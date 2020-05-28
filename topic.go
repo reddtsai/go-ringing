@@ -2,42 +2,33 @@ package ringing
 
 import (
 	"sync"
-
-	"github.com/gorilla/websocket"
-	"github.com/nsqio/go-nsq"
 )
 
 // Topic pub/pub controller
 type Topic struct {
 	name        string
 	sessions    map[*Session]bool
+	publish     *publish
 	subscribe   chan *Session
 	unsubscribe chan *Session
-	publish     chan *signal
-	close       chan struct{}
+	sink        chan []byte
+	stop        chan struct{}
 	rwmutex     *sync.RWMutex
 }
 
 func newTopic(name string) *Topic {
-	// TODO
-	config := nsq.NewConfig()
-	_, err := nsq.NewConsumer(name, "ch1", config)
-	if err != nil {
-
-	}
-
 	return &Topic{
 		name:        name,
 		sessions:    make(map[*Session]bool),
 		subscribe:   make(chan *Session),
 		unsubscribe: make(chan *Session),
-		publish:     make(chan *signal),
-		close:       make(chan struct{}),
+		sink:        make(chan []byte),
+		stop:        make(chan struct{}),
 		rwmutex:     &sync.RWMutex{},
 	}
 }
 
-func (t *Topic) task() {
+func (t *Topic) controller() {
 Loop:
 	for {
 		select {
@@ -51,19 +42,13 @@ Loop:
 				delete(t.sessions, s)
 				t.rwmutex.Unlock()
 			}
-		case signal := <-t.publish:
+		case signal := <-t.sink:
 			t.rwmutex.RLock()
 			for s := range t.sessions {
 				s.push(signal)
 			}
 			t.rwmutex.RUnlock()
-		case <-t.close:
-			t.rwmutex.Lock()
-			for s := range t.sessions {
-				s.push(&signal{msgType: websocket.CloseMessage, msg: []byte{}})
-				delete(t.sessions, s)
-			}
-			t.rwmutex.Unlock()
+		case <-t.stop:
 			break Loop
 		}
 	}
@@ -72,9 +57,21 @@ Loop:
 func (t *Topic) len() int {
 	t.rwmutex.RLock()
 	defer t.rwmutex.RUnlock()
-
 	return len(t.sessions)
 }
 
-// TODO
-// close
+func (t *Topic) close() {
+	t.stop <- struct{}{}
+	t.rwmutex.Lock()
+	for s := range t.sessions {
+		delete(t.sessions, s)
+	}
+	close(t.subscribe)
+	close(t.unsubscribe)
+	close(t.sink)
+	close(t.stop)
+	if t.publish != nil {
+		t.publish.close()
+	}
+	t.rwmutex.Unlock()
+}

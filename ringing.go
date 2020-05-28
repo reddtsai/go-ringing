@@ -1,70 +1,106 @@
 package ringing
 
 import (
+	"encoding/json"
 	"net/http"
 	"sync"
 
 	"github.com/gorilla/websocket"
 )
 
-type handleSessionFunc func(*Session)
-type handleMessageFunc func(*Session, *signal)
-type handleCloseFunc func(*Session, int, string) error
-type handleErrorFunc func(*Session, error)
-
 // Ringing implement websocket
 type Ringing struct {
-	Config               *Config
-	Upgrader             *websocket.Upgrader
-	topic                map[*Topic]bool
-	session              map[*Session]bool
-	connHandler          handleSessionFunc
-	disconnHandler       handleSessionFunc
-	receiveHandler       handleMessageFunc
-	receiveBinaryHandler handleMessageFunc
-	pongHandler          handleSessionFunc
-	sendHandler          handleMessageFunc
-	sendBinaryHandler    handleMessageFunc
-	closeHandler         handleCloseFunc
-	errHandler           handleErrorFunc
+	Config        *Config
+	Upgrader      *websocket.Upgrader
+	topics        map[string]*Topic
+	sessions      map[*Session]bool
+	handleConn    func(*Session)
+	handleDisconn func(*Session)
+	handlePong    func(*Session)
+	handleReceive func(*Session, []byte)
+	handleSend    func(*Session, []byte)
+	handleErr     func(*Session, error)
 }
 
 // New create a new Ringing instance
-func New() *Ringing {
-	upgrader := &websocket.Upgrader{
+func New(config *Config) (*Ringing, error) {
+	r := &Ringing{
+		sessions: make(map[*Session]bool),
+		Config:   config,
+	}
+
+	// ws
+	r.Upgrader = &websocket.Upgrader{
 		ReadBufferSize:  1024,
 		WriteBufferSize: 1024,
 		CheckOrigin:     func(r *http.Request) bool { return true },
 	}
-	c := newConfig()
-	topic := make(map[*Topic]bool)
-	for _, n := range c.Topic {
+
+	// topic
+	r.topics = make(map[string]*Topic)
+	for _, n := range r.Config.Topics {
 		t := newTopic(n)
-		topic[t] = true
-		go t.task()
+		p, err := registerPublish(t, r.Config.TopicHost, r.Config.TopicChannel)
+		if err != nil {
+			r.close()
+			return nil, err
+		}
+		t.publish = p
+		go t.controller()
+		r.topics[n] = t
 	}
 
-	return &Ringing{
-		Config:   c,
-		Upgrader: upgrader,
-		topic:    topic,
+	// handler
+	r.SetConnHandler(nil)
+	r.SetDisconnHandler(nil)
+	r.SetReceiveHandler(subscribe)
+	r.SetPongHandler(nil)
+	r.SetErrorHandler(nil)
+	return r, nil
+}
+
+// SetConnHandler session connect handle function
+func (r *Ringing) SetConnHandler(fn func(*Session)) {
+	if fn == nil {
+		fn = func(*Session) {}
 	}
+	r.handleConn = fn
 }
 
-// HandleConn session connect event
-func (r *Ringing) HandleConn(fn func(*Session)) {
-	r.connHandler = fn
+// SetDisconnHandler session disconnect handle function
+func (r *Ringing) SetDisconnHandler(fn func(*Session)) {
+	if fn == nil {
+		fn = func(*Session) {}
+	}
+	r.handleDisconn = fn
 }
 
-// HandleDisconn session disconnect event
-func (r *Ringing) HandleDisconn(fn func(*Session)) {
-	r.disconnHandler = fn
+// SetErrorHandler session error handle function
+func (r *Ringing) SetErrorHandler(fn func(*Session, error)) {
+	if fn == nil {
+		fn = func(*Session, error) {}
+	}
+	r.handleErr = fn
+}
+
+// SetPongHandler session pong handle function
+func (r *Ringing) SetPongHandler(fn func(*Session)) {
+	if fn == nil {
+		fn = func(*Session) {}
+	}
+	r.handlePong = fn
+}
+
+// SetReceiveHandler session receive handle function
+func (r *Ringing) SetReceiveHandler(fn func(*Session, []byte)) {
+	if fn == nil {
+		fn = func(*Session, []byte) {}
+	}
+	r.handleReceive = fn
 }
 
 // HandleRequest upgrade http request to websocket connection
 func (r *Ringing) HandleRequest(resp http.ResponseWriter, req *http.Request) error {
-	// if r.publish.isClose()
-
 	conn, err := r.Upgrader.Upgrade(resp, req, resp.Header())
 	if err != nil {
 		return err
@@ -72,22 +108,48 @@ func (r *Ringing) HandleRequest(resp http.ResponseWriter, req *http.Request) err
 	session := &Session{
 		req:     req,
 		conn:    conn,
-		sink:    make(chan *signal, r.Config.MsgBufSize),
-		ringing: r,
 		state:   true,
+		topics:  make(map[string]bool),
+		sink:    make(chan []byte, r.Config.MsgBufSize),
+		ringing: r,
+		stop:    make(chan struct{}),
 		rwmutex: &sync.RWMutex{},
 	}
-	r.session[session] = true
-
-	defer func() {
-		delete(r.session, session)
-		session.close()
-		session = nil
-	}()
+	r.sessions[session] = true
+	r.handleConn(session)
+	go session.sender()
+	go session.receiver()
 
 	return nil
 }
 
-// TODO
-// close
-// topic.close <- struct{}{}
+func subscribe(session *Session, msg []byte) {
+	req := SubscribeReq{}
+	resp := &SubscribeResp{
+		Status: "err",
+	}
+
+	err := json.Unmarshal(msg, &req)
+	if err == nil {
+		if t, ok := session.ringing.topics[req.Topic]; ok {
+			t.subscribe <- session
+			session.topics[req.Topic] = true
+			resp.Status = "ok"
+		}
+	}
+
+	b, _ := json.Marshal(resp)
+	session.sink <- b
+}
+
+func (r *Ringing) close() {
+	for k, v := range r.topics {
+		delete(r.topics, k)
+		v.close()
+		v = nil
+	}
+	for s := range r.sessions {
+		s.close()
+		s = nil
+	}
+}
