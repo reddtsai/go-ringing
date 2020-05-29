@@ -1,4 +1,4 @@
-module github.com/reddtsai/goRinging
+module github.com/reddtsai/go-ringing
 
 go 1.14
 

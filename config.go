@@ -14,16 +14,17 @@ type Config struct {
 	TopicChannel string
 }
 
-func newConfig() *Config {
-	t := []string{"orderbook"}
+// NewConfig create a new config
+func NewConfig(nsqAddr string) *Config {
+	t := []string{"all"}
 	return &Config{
 		SendWait:     10 * time.Second,
-		PongWait:     30 * time.Second,
-		PingPeriod:   (30 * time.Second * 9) / 10,
+		PongWait:     60 * time.Second,
+		PingPeriod:   (60 * time.Second * 9) / 10,
 		ReadLimit:    512,
 		MsgBufSize:   512,
 		Topics:       t,
-		TopicHost:    "",
+		TopicHost:    nsqAddr,
 		TopicChannel: "ch1",
 	}
 }
