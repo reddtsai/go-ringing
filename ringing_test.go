@@ -30,7 +30,7 @@ func NewTestServer() *TestServer {
 	go t.controller()
 
 	r := &Ringing{
-		Config:   NewConfig("localhost:4161"),
+		Config:   NewConfig(&NSQSetting{}),
 		Upgrader: upgrader,
 		topics:   topics,
 		sessions: make(map[*Session]bool),

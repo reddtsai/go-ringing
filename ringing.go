@@ -38,9 +38,9 @@ func New(config *Config) (*Ringing, error) {
 
 	// topic
 	r.topics = make(map[string]*Topic)
-	for _, n := range r.Config.Topics {
+	for _, n := range r.Config.NSQSetting.Topics {
 		t := newTopic(n)
-		p, err := registerPublish(t, r.Config.TopicHost, r.Config.TopicChannel)
+		p, err := t.registerPublish(r.Config.NSQSetting.NSQAddr, r.Config.NSQSetting.TopicChannel)
 		if err != nil {
 			r.close()
 			return nil, err

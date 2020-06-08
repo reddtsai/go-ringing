@@ -7,7 +7,12 @@ import (
 
 func main() {
 	g := gin.Default()
-	c := ringing.NewConfig("localhost:4161")
+	n := &ringing.NSQSetting{
+		NSQAddr:      "localhost:4161",
+		Topics:       []string{"all"},
+		TopicChannel: "ch1",
+	}
+	c := ringing.NewConfig(n)
 	r, err := ringing.New(c)
 	if err != nil {
 		return

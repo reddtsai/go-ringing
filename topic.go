@@ -20,9 +20,9 @@ func newTopic(name string) *Topic {
 	return &Topic{
 		name:        name,
 		sessions:    make(map[*Session]bool),
-		subscribe:   make(chan *Session),
-		unsubscribe: make(chan *Session),
-		sink:        make(chan []byte),
+		subscribe:   make(chan *Session, 128),
+		unsubscribe: make(chan *Session, 128),
+		sink:        make(chan []byte, 256),
 		stop:        make(chan struct{}),
 		rwmutex:     &sync.RWMutex{},
 	}
@@ -52,6 +52,19 @@ Loop:
 			break Loop
 		}
 	}
+}
+
+func (t *Topic) registerPublish(addr string, channel string) (*publish, error) {
+	h := &msgHandler{
+		topic: t,
+	}
+	c, err := newNSQ(addr, t.name, channel, h)
+	if err != nil {
+		return nil, err
+	}
+	return &publish{
+		consumers: c,
+	}, nil
 }
 
 func (t *Topic) len() int {
