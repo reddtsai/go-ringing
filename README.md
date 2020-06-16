@@ -4,7 +4,7 @@
 
 goRinging is Go package that for notify message. It's based on [Gorilla WebSocket](https://github.com/gorilla/websocket) and [nsqio go-nsq](https://github.com/nsqio/go-nsq).
 
-![Alt text](/examples/Ringing.png)
+![Alt text](https://github.com/reddtsai/static/blob/master/Ringing.png)
 
 ## Features
 
@@ -20,27 +20,9 @@ go get github.com/reddtsai/goRinging
 
 ## Example
 
-Using Gin:
-``` go
-package main
+[Using Gin](https://github.com/reddtsai/go-ringing/blob/master/examples/main.go)
 
-import (
-	"github.com/gin-gonic/gin"
-	"github.com/reddtsai/go-ringing"
-)
-
-func main() {
-	g := gin.Default()
-	c := ringing.NewConfig("localhost:4161")
-	r, err := ringing.New(c)
-	if err != nil {
-		return
-	}
-	g.GET("/ws", func(c *gin.Context) {
-		r.HandleRequest(c.Writer, c.Request)
-	})
-
-	g.Run(":5000")
-}
-
+test
+``` bash
+go test -v
 ```
